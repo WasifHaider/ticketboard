@@ -140,6 +140,48 @@ network. Do not expose it to the open internet without adding your own
 auth layer in front of it (a reverse proxy with basic auth is the simplest
 option).
 
+## Deploying the frontend separately (e.g. Vercel)
+
+The backend (`ticketboard/main.py`) **must** stay on your own machine — it
+shells out to `git`/`claude` and needs filesystem access to build ticket
+worktrees, which a serverless platform can't provide. Only the static
+frontend (`ticketboard/static/`) is deployable elsewhere.
+
+1. **Expose your backend publicly** via a tunnel — since your laptop isn't
+   reachable from the internet directly. [Tailscale
+   Funnel](https://tailscale.com/kb/1223/funnel) is a good fit (free,
+   no port-forwarding, stable HTTPS URL): install Tailscale on this
+   machine, then `tailscale funnel 8000` — it prints your public URL,
+   something like `https://<machine>.<tailnet>.ts.net`.
+2. **Allow the frontend's origin via CORS** — set
+   `TICKETBOARD_CORS_ORIGINS` to your Vercel URL(s) before starting the
+   server:
+   ```
+   set TICKETBOARD_CORS_ORIGINS=https://ticketboard.vercel.app
+   python -m uvicorn ticketboard.main:app --host 0.0.0.0 --port 8000
+   ```
+   Comma-separate multiple origins (e.g. your Vercel preview-deploy URLs
+   too). This is empty/deny-by-default — same-origin local use needs no
+   CORS config at all.
+3. **Point the frontend at your backend** — edit
+   `ticketboard/static/config.js`, set `DEFAULT_API_BASE` to your tunnel
+   URL from step 1 (no trailing slash), commit, and deploy. There's no
+   build step, so this is a plain text edit — Vercel serves the static
+   files as-is (see `vercel.json`, `outputDirectory` points at
+   `ticketboard/static`).
+
+   To test against a different backend without redeploying, open the
+   deployed frontend with `?api=https://your-backend-url` once — it's
+   saved to the browser's localStorage and reused on future visits (clear
+   it with `?api=`).
+4. Your laptop still needs to be **on and awake** for the backend/worker
+   to do anything — Vercel only hosts the static UI; ticket builds still
+   happen locally.
+
+This still has no auth (see the note above) — a Tailscale Funnel URL is
+public on the internet the moment you enable it, so treat this the same
+as any other unauthenticated public endpoint.
+
 ## Development
 
 ```bash

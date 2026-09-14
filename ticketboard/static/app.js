@@ -6,7 +6,8 @@ function css(varName) {
 }
 
 async function fetchJSON(url, opts) {
-  const resp = await fetch(url, opts);
+  const base = window.TICKETBOARD_API_BASE || "";
+  const resp = await fetch(base + url, opts);
   if (!resp.ok) {
     const body = await resp.text();
     throw new Error(`${resp.status}: ${body}`);

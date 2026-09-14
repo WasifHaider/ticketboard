@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from ticketboard import config, db
@@ -21,6 +22,20 @@ def create_app(db_path: str | None = None) -> FastAPI:
         conn.close()
 
     app = FastAPI(title="TICKETBOARD", lifespan=lifespan)
+
+    if config.CORS_ORIGINS:
+        # Only needed when the frontend is deployed on a different origin
+        # than this API (e.g. Vercel). Same-origin local use (the default)
+        # never hits this — the browser doesn't send/require CORS headers
+        # for same-origin requests.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=config.CORS_ORIGINS,
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
     app.include_router(projects_routes.router)
     app.include_router(tickets_routes.router)
 
