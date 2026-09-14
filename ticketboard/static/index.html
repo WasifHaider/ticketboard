@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#1a1712" />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="mask-icon" href="/favicon.svg" color="#ffb454" />
+<link rel="apple-touch-icon" href="/favicon.svg" />
+<title>TICKETBOARD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<div id="app" class="app" v-cloak>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">TICKETBOARD</span>
+      <span class="brand-ver">v1.0</span>
+    </div>
+    <div class="vr"></div>
+    <button class="chip-btn" @click="refreshAll">
+      <span class="dot dot-accent"></span>
+      <span>Refresh</span>
+    </button>
+    <div class="spacer"></div>
+    <div class="totals">{{ totalOpen }} OPEN / {{ tickets.length }} TOTAL</div>
+    <button class="btn-primary" @click="openNewTicketModal">
+      <span class="plus">+</span>
+      <span>New ticket</span>
+    </button>
+  </header>
+
+  <main class="layout">
+    <section class="board">
+      <div class="col" v-for="status in STATUSES" :key="status">
+        <div class="col-head">
+          <div class="col-head-row">
+            <span class="col-live-dot" v-if="status === 'in_progress' && byStatus[status].length > 0"></span>
+            <span class="col-label" :style="{ color: status === 'in_progress' ? COLUMN_VAR[status] : status === 'failed' ? 'oklch(0.80 0.09 25)' : 'oklch(0.78 0.006 60)' }">{{ COLUMN_LABEL[status] }}</span>
+            <div class="spacer"></div>
+            <span class="col-count">{{ byStatus[status].length }}</span>
+          </div>
+          <div class="col-rule" :style="{ background: COLUMN_VAR[status] }"></div>
+          <div class="col-rule-2"></div>
+        </div>
+        <div class="col-body">
+          <div class="col-empty" v-if="byStatus[status].length === 0">
+            {{ status === 'in_progress' ? 'IDLE — NOTHING BUILDING' : status === 'failed' ? 'NOTHING TO REVIEW' : status === 'needs_review' ? 'NOTHING FLAGGED' : 'EMPTY' }}
+          </div>
+          <article
+            v-for="t in byStatus[status]"
+            :key="t.id"
+            class="card"
+            :class="{ 'is-building': status === 'in_progress', 'is-failed': status === 'failed', 'is-needs-review': status === 'needs_review' }"
+            @click="openDetail(t.id)"
+          >
+            <div class="card-spine" :style="{ background: COLUMN_VAR[status] }"></div>
+            <div class="card-inner">
+              <div class="card-top">
+                <span class="card-code" :style="{ color: COLUMN_VAR[status] }">{{ ticketCode(t) }}</span>
+                <span class="card-project">{{ projectName(t.project_id) }}</span>
+                <div class="spacer"></div>
+                <span v-if="status === 'in_progress'" class="card-flag" :style="{ background: COLUMN_TINT_VAR[status], color: COLUMN_VAR[status] }">BUILDING</span>
+                <span v-else-if="status === 'failed'" class="card-flag" :style="{ background: COLUMN_TINT_VAR[status], color: COLUMN_VAR[status] }">FAILED</span>
+                <span v-else-if="status === 'needs_review'" class="card-flag" :style="{ background: COLUMN_TINT_VAR[status], color: COLUMN_VAR[status] }">JUDGE FLAG</span>
+              </div>
+              <div class="card-title">{{ t.title }}</div>
+
+              <div class="card-progress" v-if="status === 'in_progress'">
+                <div class="card-progress-track"><div class="card-progress-fill" :style="{ width: '60%', background: COLUMN_VAR[status] }"></div></div>
+                <div class="card-progress-meta"><span :style="{ color: COLUMN_VAR[status], fontWeight: 600 }">building…</span><span class="muted">worker is on this ticket</span></div>
+              </div>
+              <div class="card-fail-box" v-else-if="status === 'failed'">
+                <div class="card-fail-text">Build failed — open for details</div>
+              </div>
+              <div class="card-fail-box" v-else-if="status === 'needs_review'">
+                <div class="card-fail-text">{{ (t.judge_reason || 'Judge flagged this build — open to review').slice(0, 140) }}</div>
+              </div>
+              <div class="card-foot" v-else>
+                <span>{{ t.acceptance_criteria ? "AC set" : "no AC" }}</span>
+                <span v-if="t.files_hint">{{ t.files_hint.length > 24 ? t.files_hint.slice(0, 24) + "…" : t.files_hint }}</span>
+                <div class="spacer"></div>
+                <span v-if="t.branch_name" class="branch-name">{{ t.branch_name }}</span>
+                <button v-if="t.status === 'todo'" class="promote-btn" @click.stop="promoteTicket(t.id)">PROMOTE →</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <div class="sb-block sb-worker">
+        <div class="sb-row">
+          <span class="sb-label">Worker</span>
+          <div class="spacer"></div>
+        </div>
+        <div class="hb-card" :class="hbClass">
+          <span class="hb-dot"></span>
+          <div class="hb-text">
+            <div class="hb-title">{{ hbTitle }}</div>
+            <div class="hb-sub">{{ hbSub }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sb-block">
+        <div class="sb-label" style="margin-bottom:11px;">Now building</div>
+        <div>
+          <div v-if="!nowBuilding" class="nb-idle">IDLE — NOTHING BUILDING</div>
+          <div v-else class="now-building-card" @click="openDetail(nowBuilding.id)">
+            <div class="nb-top">
+              <span class="nb-code">{{ ticketCode(nowBuilding) }}</span>
+              <span class="nb-project">{{ projectName(nowBuilding.project_id) }}</span>
+              <div class="spacer"></div>
+            </div>
+            <div class="nb-title">{{ nowBuilding.title }}</div>
+            <div v-if="nowBuilding.branch_name" class="nb-branch">{{ nowBuilding.branch_name }}</div>
+          </div>
+        </div>
+        <div class="sb-stats">
+          <div class="stat-box">
+            <div class="stat-num accent-blue">{{ byStatus.ready.length }}</div>
+            <div class="stat-label">queued</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-num accent-red">{{ byStatus.failed.length + byStatus.needs_review.length }}</div>
+            <div class="stat-label">need review</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sb-block sb-log">
+        <div class="sb-label" style="padding:14px 15px 9px;">Dispatcher log</div>
+        <div class="log-list">
+          <div v-if="logError" class="log-empty">could not load log</div>
+          <div v-else-if="dispatcherLog.length === 0" class="log-empty">no activity yet</div>
+          <div v-else class="log-row" v-for="e in dispatcherLog" :key="e.id">
+            <span class="log-time">{{ timeOnly(e.created_at) }}</span>
+            <div>
+              <span class="log-code" :style="{ color: logColor(e.event_type) }">TB-{{ e.ticket_id }}</span>
+              <span class="log-msg"> {{ e.event_type }}: {{ (e.message || "").slice(0, 60) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ---------------- Ticket detail modal ---------------- -->
+  <div class="modal-overlay" :class="{ hidden: !detailOpen }" @click.self="closeDetail">
+    <div class="modal detail-modal" v-if="currentTicket">
+      <div class="modal-head">
+        <span class="mono code" :style="{ color: detailHue }">{{ ticketCode(currentTicket) }}</span>
+        <span class="status-chip" :style="{ background: detailTint, color: detailHue }">
+          <span class="chip-dot"></span><span>{{ COLUMN_LABEL[currentTicket.status] }}</span>
+        </span>
+        <span class="mono muted">{{ projectName(currentTicket.project_id) }}</span>
+        <div class="spacer"></div>
+        <div class="branch-pill" v-if="currentTicket.branch_name">
+          <span class="muted">branch</span>
+          <span>{{ currentTicket.branch_name }}</span>
+        </div>
+        <button class="icon-btn" @click="closeDetail">&times;</button>
+      </div>
+      <h1 class="modal-title">{{ currentTicket.title }}</h1>
+
+      <div class="modal-body">
+        <div class="modal-main">
+          <div class="field-block">
+            <div class="field-label">Objective</div>
+            <p class="field-text">{{ currentTicket.objective }}</p>
+          </div>
+
+          <div class="field-block">
+            <div class="field-label-row">
+              <span class="field-label">Acceptance criteria</span>
+            </div>
+            <div class="ac-text">{{ currentTicket.acceptance_criteria }}</div>
+          </div>
+
+          <div class="field-block" v-if="currentTicket.judge_verdict">
+            <div class="field-label-row">
+              <span class="field-label">Judge Verdict</span>
+              <span class="card-flag" :style="{ background: currentTicket.judge_verdict === 'pass' ? 'var(--done-tint)' : 'var(--needs-review-tint)', color: currentTicket.judge_verdict === 'pass' ? 'var(--done)' : 'var(--needs-review)' }">{{ currentTicket.judge_verdict.toUpperCase() }}</span>
+            </div>
+            <div class="ac-text">{{ currentTicket.judge_reason || "(no reason recorded)" }}</div>
+          </div>
+
+          <div class="two-col">
+            <div>
+              <div class="field-label">Files hint</div>
+              <div class="mono-box">{{ currentTicket.files_hint || "(none)" }}</div>
+            </div>
+            <div>
+              <div class="field-label">Attachments</div>
+              <div class="attachment-list">
+                <div v-if="!currentTicket.attachments || currentTicket.attachments.length === 0" class="attachment-empty">no attachments</div>
+                <div v-else class="attachment-row" v-for="a in currentTicket.attachments" :key="a.id">
+                  <span class="attachment-ext">{{ (a.filename.split('.').pop() || '?').toUpperCase().slice(0, 3) }}</span>
+                  <span class="attachment-name">{{ a.filename }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-block">
+            <div class="field-label" style="margin-bottom:13px;">Worker timeline</div>
+            <div class="timeline">
+              <div class="attachment-empty" v-if="!currentTicket.events || currentTicket.events.length === 0">no worker activity yet</div>
+              <div class="timeline-row" v-for="(ev, i) in (currentTicket.events || [])" :key="ev.id">
+                <span class="timeline-time">{{ timeOnly(ev.created_at) }}</span>
+                <div class="timeline-rail">
+                  <span class="timeline-dot" :style="{ background: eventColor(ev.event_type) }"></span>
+                  <span class="timeline-line" v-if="i !== currentTicket.events.length - 1"></span>
+                </div>
+                <div class="timeline-content">
+                  <div class="timeline-label" :style="{ color: eventColor(ev.event_type) }">{{ ev.event_type }}</div>
+                  <div class="timeline-detail" :class="ev.event_type === 'fail' ? 'is-fail' : 'is-normal'">{{ ev.message }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-side">
+          <div class="chat-head">
+            <span class="sb-label">Discuss this ticket</span>
+            <div class="spacer"></div>
+            <span class="mono muted">{{ (currentTicket.messages || []).length }} notes</span>
+          </div>
+          <div class="chat-log">
+            <div v-if="(currentTicket.messages || []).length === 0" class="chat-empty">No messages yet. Ask something below.</div>
+            <div class="chat-msg-row" v-for="m in (currentTicket.messages || [])" :key="m.id">
+              <div class="chat-msg-time">{{ timeOnly(m.created_at) }}</div>
+              <div class="chat-msg-body">
+                <div class="chat-msg-author-row">
+                  <span class="chat-msg-author" :style="{ color: m.role === 'user' ? 'oklch(0.82 0.006 60)' : 'var(--ready)' }">{{ m.role === "user" ? "You" : "Agent" }}</span>
+                </div>
+                <div class="chat-msg-text">{{ m.message }}</div>
+              </div>
+            </div>
+          </div>
+          <div class="approve-bar" :class="{ hidden: !approveConfig }" v-if="approveConfig">
+            <div class="approve-text">
+              <div class="approve-title">{{ approveConfig.title }}</div>
+              <div class="approve-sub">{{ approveConfig.sub }}</div>
+            </div>
+            <button class="btn-approve" @click="approveFromDetail">{{ approveConfig.btn }}</button>
+          </div>
+          <div class="chat-input-block">
+            <textarea v-model="chatInput" rows="3" placeholder="Ask about scope, tighten the criteria, or note a constraint…" @keydown="onChatKeydown"></textarea>
+            <div class="chat-input-foot">
+              <span class="mono muted small">context: objective + criteria + attachments</span>
+              <div class="spacer"></div>
+              <button class="btn-ghost" :disabled="chatSending" @click="sendChatMessage">{{ chatSending ? "Sending…" : "Send" }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------- New ticket modal ---------------- -->
+  <div class="modal-overlay" :class="{ hidden: !newTicketOpen }" @click.self="closeNewTicketModal">
+    <div class="modal new-modal">
+      <div class="modal-head">
+        <span class="modal-heading">New ticket</span>
+        <span class="mono muted small">CREATED INTO TO DO</span>
+        <div class="spacer"></div>
+        <button class="icon-btn" @click="closeNewTicketModal">&times;</button>
+      </div>
+
+      <div class="new-body">
+        <div class="new-left">
+          <div class="step-head">
+            <span class="step-num accent-blue">01</span>
+            <span class="step-title">Project</span>
+          </div>
+          <p class="step-desc">The git repo the worker builds in an isolated worktree, and the test command it must pass.</p>
+
+          <div class="project-list">
+            <div
+              v-for="p in projects"
+              :key="p.id"
+              class="project-row"
+              :class="{ selected: selectedProjectId === p.id }"
+              @click="selectedProjectId = p.id"
+            >
+              <div class="project-row-top">
+                <span class="project-dot"><span class="project-dot-inner" :style="{ background: selectedProjectId === p.id ? 'var(--ready)' : 'transparent' }"></span></span>
+                <span class="project-name">{{ p.name }}</span>
+                <div class="spacer"></div>
+                <span class="project-open">{{ openCountForProject(p.id) }} open</span>
+              </div>
+              <div class="project-detail">
+                <div class="project-path">{{ p.repo_path }}</div>
+                <div class="project-test">{{ p.test_command ? "$ " + p.test_command : "(no test command)" }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="or-divider"><span>OR REGISTER</span></div>
+
+          <div class="new-project-box">
+            <div>
+              <div class="mini-label">NAME</div>
+              <input type="text" v-model.trim="newProject.name" placeholder="internal-api" />
+            </div>
+            <div>
+              <div class="mini-label">REPO PATH</div>
+              <div class="repo-path-row">
+                <input type="text" v-model.trim="newProject.repoPath" placeholder="D:\path\to\repo" />
+                <button type="button" class="btn-secondary" :disabled="browsing" @click="browseFolder">{{ browsing ? "Opening…" : "Browse…" }}</button>
+              </div>
+            </div>
+            <div>
+              <div class="mini-label">TEST COMMAND</div>
+              <input type="text" v-model.trim="newProject.testCommand" placeholder="pytest -q" />
+            </div>
+          </div>
+        </div>
+
+        <div class="new-right">
+          <div class="step-head">
+            <span class="step-num accent-amber">02</span>
+            <span class="step-title">Ticket</span>
+          </div>
+          <p class="step-desc">Everything here is handed to the agent verbatim. Criteria become the pass/fail contract.</p>
+
+          <form @submit.prevent="submitNewTicket">
+            <div class="field-block">
+              <div class="field-label">Title</div>
+              <input type="text" v-model.trim="newTicket.title" placeholder="Short imperative summary" required />
+            </div>
+
+            <div class="field-block">
+              <div class="field-label-row">
+                <span class="field-label">Objective</span>
+                <span class="mono muted small">what and why</span>
+              </div>
+              <textarea v-model.trim="newTicket.objective" rows="4" placeholder="Describe the outcome, not the implementation." required></textarea>
+            </div>
+
+            <div class="field-block">
+              <div class="field-label-row">
+                <span class="field-label">Acceptance criteria</span>
+                <span class="mono muted small">one per line</span>
+              </div>
+              <textarea v-model.trim="newTicket.acceptance" rows="4" placeholder="One checkable outcome per line" required></textarea>
+            </div>
+
+            <div class="two-col">
+              <div>
+                <div class="field-label">Files hint</div>
+                <input type="text" v-model.trim="newTicket.filesHint" placeholder="app/routes/*.py, tests/" />
+                <div class="hint-note">optional — narrows the agent's search</div>
+              </div>
+              <div>
+                <div class="field-label">Attachment</div>
+                <label class="drop-zone">
+                  <div class="mono">DROP FILE</div>
+                  <div class="hint-note">spec, log, screenshot</div>
+                  <input type="file" hidden @change="onFileChange" />
+                </label>
+                <div class="hint-note">{{ attachmentFile ? attachmentFile.name : "" }}</div>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="new-foot">
+        <span class="mono muted small">Nothing runs until you promote it to Ready.</span>
+        <div class="spacer"></div>
+        <button class="btn-secondary" @click="closeNewTicketModal">Cancel</button>
+        <button class="btn-primary" :disabled="submitting" @click="submitNewTicket">{{ submitting ? "Creating…" : "Create ticket" }}</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/vue@3.4.31/dist/vue.global.prod.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
